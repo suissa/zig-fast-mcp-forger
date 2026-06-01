@@ -38,15 +38,16 @@ fn help_and_exit(filename: []const u8, err: anyerror) void {
     );
     std.process.exit(1);
 }
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
     const CERT_FILE = "mycert.pem";
     const KEY_FILE = "mykey.pem";
 
-    std.fs.cwd().access(CERT_FILE, .{}) catch |err| {
+    std.Io.Dir.cwd().access(io, CERT_FILE, .{}) catch |err| {
         help_and_exit(CERT_FILE, err);
     };
 
-    std.fs.cwd().access(KEY_FILE, .{}) catch |err| {
+    std.Io.Dir.cwd().access(io, KEY_FILE, .{}) catch |err| {
         help_and_exit(KEY_FILE, err);
     };
 
