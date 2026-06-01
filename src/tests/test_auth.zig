@@ -111,7 +111,9 @@ const ClientAuthReqHeaderFields = struct {
 };
 
 fn makeRequest(a: std.mem.Allocator, url: []const u8, auth: ?ClientAuthReqHeaderFields) !void {
-    const io = std.Io.Threaded.global_single_threaded.io();
+    var threaded: std.Io.Threaded = .init(a, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
     var http_client: std.http.Client = .{ .allocator = a, .io = io };
     defer http_client.deinit();
 
@@ -155,7 +157,10 @@ pub const Endpoint = struct {
     pub fn get(_: *Endpoint, r: zap.Request) !void {
         r.sendBody(HTTP_RESPONSE) catch return;
         received_response = HTTP_RESPONSE;
-        std.Io.Threaded.global_single_threaded.io().sleep(std.Io.Duration.fromNanoseconds(std.time.ns_per_s), .awake) catch {};
+        var threaded: std.Io.Threaded = .init(std.testing.allocator, .{});
+        defer threaded.deinit();
+        const io = threaded.io();
+        io.sleep(std.Io.Duration.fromNanoseconds(std.time.ns_per_s), .awake) catch {};
         zap.stop();
     }
 
@@ -163,7 +168,10 @@ pub const Endpoint = struct {
         r.setStatus(.unauthorized);
         r.sendBody("UNAUTHORIZED ACCESS") catch return;
         received_response = "UNAUTHORIZED";
-        std.Io.Threaded.global_single_threaded.io().sleep(std.Io.Duration.fromNanoseconds(std.time.ns_per_s), .awake) catch {};
+        var threaded: std.Io.Threaded = .init(std.testing.allocator, .{});
+        defer threaded.deinit();
+        const io = threaded.io();
+        io.sleep(std.Io.Duration.fromNanoseconds(std.time.ns_per_s), .awake) catch {};
         zap.stop();
     }
 };

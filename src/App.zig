@@ -16,36 +16,6 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Thread = std.Thread;
 
-/// A minimal, `std.Io`-free spinning reader/writer lock. Zig 0.16 removed
-/// `std.Thread.RwLock`; the `std.Io`-based replacements require an `Io` value at
-/// every lock/unlock call, which this code path does not have available.
-/// `state`: 0 = unlocked, -1 = write-locked, N>0 = N readers.
-const RwLock = struct {
-    state: std.atomic.Value(i32) = .init(0),
-
-    pub fn lock(self: *RwLock) void {
-        while (self.state.cmpxchgWeak(0, -1, .acquire, .monotonic) != null) {
-            std.atomic.spinLoopHint();
-        }
-    }
-
-    pub fn unlock(self: *RwLock) void {
-        self.state.store(0, .release);
-    }
-
-    pub fn lockShared(self: *RwLock) void {
-        while (true) {
-            const cur = self.state.load(.monotonic);
-            if (cur >= 0 and self.state.cmpxchgWeak(cur, cur + 1, .acquire, .monotonic) == null) return;
-            std.atomic.spinLoopHint();
-        }
-    }
-
-    pub fn unlockShared(self: *RwLock) void {
-        _ = self.state.fetchSub(1, .release);
-    }
-};
-
 const zap = @import("zap.zig");
 const Request = zap.Request;
 const HttpListener = zap.HttpListener;
@@ -78,6 +48,7 @@ pub fn Create(
         // we make the following fields static so we can access them from a
         // context-free, pure zap request handler
         const InstanceData = struct {
+            io: std.Io = undefined,
             context: *Context = undefined,
             gpa: Allocator = undefined,
             opts: AppOpts = undefined,
@@ -85,7 +56,7 @@ pub fn Create(
 
             there_can_be_only_one: bool = false,
             track_arenas: std.AutoHashMapUnmanaged(Thread.Id, ArenaAllocator) = .empty,
-            track_arena_lock: RwLock = .{},
+            track_arena_lock: std.Io.RwLock = .init,
 
             /// the internal http listener
             listener: HttpListener = undefined,
@@ -360,10 +331,11 @@ pub fn Create(
             tls: ?zap.Tls = null,
         };
 
-        pub fn init(gpa_: Allocator, context_: *Context, opts_: AppOpts) !void {
+        pub fn init(io_: std.Io, gpa_: Allocator, context_: *Context, opts_: AppOpts) !void {
             if (_static.there_can_be_only_one) {
                 return error.OnlyOneAppAllowed;
             }
+            _static.io = io_;
             _static.context = context_;
             _static.gpa = gpa_;
             _static.opts = opts_;
@@ -406,8 +378,8 @@ pub fn Create(
             }
             _static.endpoints.deinit(_static.gpa);
 
-            _static.track_arena_lock.lock();
-            defer _static.track_arena_lock.unlock();
+            _static.track_arena_lock.lockUncancelable(_static.io);
+            defer _static.track_arena_lock.unlock(_static.io);
 
             var it = _static.track_arenas.valueIterator();
             while (it.next()) |arena| {
@@ -433,14 +405,14 @@ pub fn Create(
 
         pub fn get_arena() !*ArenaAllocator {
             const thread_id = std.Thread.getCurrentId();
-            _static.track_arena_lock.lockShared();
+            _static.track_arena_lock.lockSharedUncancelable(_static.io);
             if (_static.track_arenas.getPtr(thread_id)) |arena| {
-                _static.track_arena_lock.unlockShared();
+                _static.track_arena_lock.unlockShared(_static.io);
                 return arena;
             } else {
-                _static.track_arena_lock.unlockShared();
-                _static.track_arena_lock.lock();
-                defer _static.track_arena_lock.unlock();
+                _static.track_arena_lock.unlockShared(_static.io);
+                _static.track_arena_lock.lockUncancelable(_static.io);
+                defer _static.track_arena_lock.unlock(_static.io);
                 const arena = ArenaAllocator.init(_static.gpa);
                 try _static.track_arenas.put(_static.gpa, thread_id, arena);
                 return _static.track_arenas.getPtr(thread_id).?;

@@ -80,7 +80,7 @@ pub fn main(init: std.process.Init) !void {
 
     // undocumented commands
     if (std.mem.eql(u8, command, "tag-annotation")) {
-        const annotation = try get_tag_annotation(gpa, tagname);
+        const annotation = try get_tag_annotation(io, gpa, tagname);
         defer gpa.free(annotation);
         std.debug.print("{s}\n", .{annotation});
         return;
@@ -91,7 +91,7 @@ pub fn main(init: std.process.Init) !void {
 }
 
 /// returns the tag's annotation you own and must free
-fn get_tag_annotation(allocator: std.mem.Allocator, tagname: []const u8) ![]const u8 {
+fn get_tag_annotation(io: std.Io, allocator: std.mem.Allocator, tagname: []const u8) ![]const u8 {
     const args = [_][]const u8{
         "git",
         "tag",
@@ -100,7 +100,7 @@ fn get_tag_annotation(allocator: std.mem.Allocator, tagname: []const u8) ![]cons
         tagname,
     };
 
-    const result = try std.process.run(allocator, std.Io.Threaded.global_single_threaded.io(), .{
+    const result = try std.process.run(allocator, io, .{
         .argv = &args,
     });
     const return_string = switch (result.term) {
@@ -284,7 +284,7 @@ fn sendToDiscord(io: std.Io, allocator: std.mem.Allocator, url: []const u8, mess
 }
 
 fn command_announce(io: std.Io, allocator: std.mem.Allocator, url: []const u8, tag: []const u8) !void {
-    const annotation = try get_tag_annotation(allocator, tag);
+    const annotation = try get_tag_annotation(io, allocator, tag);
     defer allocator.free(annotation);
 
     const announcement = try renderTemplate(allocator, RELEASE_ANNOUNCEMENT_TEMPLATE, .{
@@ -301,7 +301,7 @@ fn command_announce(io: std.Io, allocator: std.mem.Allocator, url: []const u8, t
 }
 
 fn command_releasenotes(io: std.Io, allocator: std.mem.Allocator, tag: []const u8) !void {
-    const annotation = try get_tag_annotation(allocator, tag);
+    const annotation = try get_tag_annotation(io, allocator, tag);
     defer allocator.free(annotation);
 
     const release_notes = try renderTemplate(allocator, RELEASE_NOTES_TEMPLATE, .{
@@ -317,7 +317,7 @@ fn command_releasenotes(io: std.Io, allocator: std.mem.Allocator, tag: []const u
     try stdout.flush();
 }
 fn command_update_readme(io: std.Io, allocator: std.mem.Allocator, tag: []const u8) !void {
-    const annotation = try get_tag_annotation(allocator, tag);
+    const annotation = try get_tag_annotation(io, allocator, tag);
     defer allocator.free(annotation);
 
     const update_part = try renderTemplate(allocator, README_UPDATE_TEMPLATE, .{

@@ -14,12 +14,13 @@ path: []const u8,
 error_strategy: zap.Endpoint.ErrorStrategy = .log_to_response,
 
 pub fn init(
+    io: std.Io,
     a: std.mem.Allocator,
     user_path: []const u8,
 ) UserWeb {
     return .{
         .alloc = a,
-        ._users = Users.init(a),
+        ._users = Users.init(io, a),
         .path = user_path,
     };
 }

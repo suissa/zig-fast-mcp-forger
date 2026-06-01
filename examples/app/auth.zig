@@ -60,7 +60,9 @@ const MyEndpoint = struct {
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     var gpa: std.heap.DebugAllocator(.{
         // just to be explicit
         .thread_safe = true,
@@ -75,7 +77,7 @@ pub fn main() !void {
     // App is the type
     // app is the instance
     const App = zap.App.Create(MyContext);
-    try App.init(allocator, &my_context, .{});
+    try App.init(io, allocator, &my_context, .{});
     defer App.deinit();
 
     // create mini endpoint

@@ -63,7 +63,9 @@ const StopEndpoint = struct {
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     // setup allocations
     var gpa: std.heap.DebugAllocator(.{
         // just to be explicit
@@ -77,7 +79,7 @@ pub fn main() !void {
 
     // create an App instance
     const App = zap.App.Create(MyContext);
-    try App.init(allocator, &my_context, .{});
+    try App.init(io, allocator, &my_context, .{});
     defer App.deinit();
 
     // create the endpoints

@@ -24,7 +24,9 @@ fn on_error(_: zap.Request, err: anyerror) void {
     std.debug.print("\n\n\nOh no!!! We didn't chatch this error: {}\n\n\n", .{err});
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
@@ -49,7 +51,7 @@ pub fn main() !void {
         defer listener.deinit();
 
         // /users endpoint
-        var userWeb = UserWeb.init(allocator, "/users");
+        var userWeb = UserWeb.init(io, allocator, "/users");
         defer userWeb.deinit();
 
         var stopEp = StopEndpoint.init("/stop");

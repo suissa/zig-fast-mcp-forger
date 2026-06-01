@@ -15,7 +15,9 @@ var read_len: ?usize = null;
 const testfile = @embedFile("testfile.txt");
 
 fn makeRequest(a: std.mem.Allocator, url: []const u8) !void {
-    const io = std.Io.Threaded.global_single_threaded.io();
+    var threaded: std.Io.Threaded = .init(a, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
     var http_client: std.http.Client = .{ .allocator = a, .io = io };
     defer http_client.deinit();
 

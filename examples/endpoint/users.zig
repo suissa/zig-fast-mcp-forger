@@ -1,15 +1,9 @@
 const std = @import("std");
 
-// Zig 0.16 removed Mutex; small io-free spinlock drop-in.
-const Mutex = struct {
-    locked: std.atomic.Value(bool) = .init(false),
-    pub fn lock(s: *Mutex) void { while (s.locked.swap(true, .acquire)) std.atomic.spinLoopHint(); }
-    pub fn unlock(s: *Mutex) void { s.locked.store(false, .release); }
-};
-
+io: std.Io = undefined,
 alloc: std.mem.Allocator = undefined,
 users: std.AutoHashMap(usize, InternalUser) = undefined,
-lock: Mutex = undefined,
+lock: std.Io.Mutex = .init,
 count: usize = 0,
 
 pub const Users = @This();
@@ -28,11 +22,12 @@ pub const User = struct {
     last_name: []const u8,
 };
 
-pub fn init(a: std.mem.Allocator) Users {
+pub fn init(io: std.Io, a: std.mem.Allocator) Users {
     return .{
+        .io = io,
         .alloc = a,
         .users = std.AutoHashMap(usize, InternalUser).init(a),
-        .lock = Mutex{},
+        .lock = .init,
     };
 }
 
@@ -58,8 +53,8 @@ pub fn addByName(self: *Users, first: ?[]const u8, last: ?[]const u8) !usize {
     }
 
     // We lock only on insertion, deletion, and listing
-    self.lock.lock();
-    defer self.lock.unlock();
+    self.lock.lockUncancelable(self.io);
+    defer self.lock.unlock(self.io);
     user.id = self.count + 1;
     if (self.users.put(user.id, user)) {
         self.count += 1;
@@ -73,8 +68,8 @@ pub fn addByName(self: *Users, first: ?[]const u8, last: ?[]const u8) !usize {
 
 pub fn delete(self: *Users, id: usize) bool {
     // We lock only on insertion, deletion, and listing
-    self.lock.lock();
-    defer self.lock.unlock();
+    self.lock.lockUncancelable(self.io);
+    defer self.lock.unlock(self.io);
 
     const ret = self.users.remove(id);
     if (ret) {
@@ -120,8 +115,8 @@ pub fn update(
 }
 
 pub fn toJSON(self: *Users) ![]const u8 {
-    self.lock.lock();
-    defer self.lock.unlock();
+    self.lock.lockUncancelable(self.io);
+    defer self.lock.unlock(self.io);
 
     // We create a User list that's JSON-friendly
     // NOTE: we could also implement the whole JSON writing ourselves here,
@@ -165,8 +160,8 @@ pub fn listWithRaceCondition(self: *Users, out: *std.ArrayList(User)) !void {
     // So, to mitigate that, either:
     // - [x] listing and converting to JSON must become one locked operation
     // - or: the iterator must make copies of the strings
-    self.lock.lock();
-    defer self.lock.unlock();
+    self.lock.lockUncancelable(self.io);
+    defer self.lock.unlock(self.io);
     var it = JsonUserIteratorWithRaceCondition.init(&self.users);
     while (it.next()) |user| {
         try out.append(user);

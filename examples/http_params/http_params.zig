@@ -16,8 +16,7 @@ pub const std_options: std.Options = .{
 };
 
 // We send ourselves a request
-fn makeRequest(a: std.mem.Allocator, url: []const u8) !void {
-    const io = std.Io.Threaded.global_single_threaded.io();
+fn makeRequest(io: std.Io, a: std.mem.Allocator, url: []const u8) !void {
     var http_client: std.http.Client = .{ .allocator = a, .io = io };
     defer http_client.deinit();
 
@@ -32,12 +31,14 @@ fn makeRequest(a: std.mem.Allocator, url: []const u8) !void {
     }
 }
 
-fn makeRequestThread(a: std.mem.Allocator, url: []const u8) !std.Thread {
-    return try std.Thread.spawn(.{}, makeRequest, .{ a, url });
+fn makeRequestThread(io: std.Io, a: std.mem.Allocator, url: []const u8) !std.Thread {
+    return try std.Thread.spawn(.{}, makeRequest, .{ io, a, url });
 }
 
 // here we go
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
@@ -139,7 +140,7 @@ pub fn main() !void {
     try listener.listen();
     std.log.info("\n\nTerminate with CTRL+C or by sending query param terminate=true", .{});
 
-    const thread = try makeRequestThread(allocator, "http://127.0.0.1:3000/?one=1&two=2&string=hello+world&float=6.28&bool=true");
+    const thread = try makeRequestThread(io, allocator, "http://127.0.0.1:3000/?one=1&two=2&string=hello+world&float=6.28&bool=true");
     defer thread.join();
     zap.start(.{
         .threads = 1,

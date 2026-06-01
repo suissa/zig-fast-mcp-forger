@@ -130,7 +130,9 @@ fn on_request(r: zap.Request) !void {
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
@@ -159,6 +161,7 @@ pub fn main() !void {
         // pair, it will create an ephermal session token and let subsequent
         // requests that present the cookie through until, in our case: /logout.
         authenticator = try Authenticator.init(
+            io,
             allocator,
             &userpass,
             .{

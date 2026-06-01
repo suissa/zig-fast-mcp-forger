@@ -30,10 +30,13 @@ const SimpleEndpoint = struct {
     // data specific for this endpoint
     some_data: []const u8,
 
-    pub fn init(path: []const u8, data: []const u8) SimpleEndpoint {
+    io: std.Io,
+
+    pub fn init(io: std.Io, path: []const u8, data: []const u8) SimpleEndpoint {
         return .{
             .path = path,
             .some_data = data,
+            .io = io,
         };
     }
 
@@ -57,7 +60,7 @@ const SimpleEndpoint = struct {
             .{ context.db_connection, e.some_data, arena.ptr, thread_id },
         );
         try r.sendBody(response_text);
-        std.Io.Threaded.global_single_threaded.io().sleep(std.Io.Duration.fromNanoseconds(std.time.ns_per_ms * 300), .awake) catch {};
+        e.io.sleep(std.Io.Duration.fromNanoseconds(std.time.ns_per_ms * 300), .awake) catch {};
     }
 };
 
@@ -76,7 +79,9 @@ const StopEndpoint = struct {
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     // setup allocations
     var gpa: std.heap.DebugAllocator(.{
         // just to be explicit
@@ -90,11 +95,11 @@ pub fn main() !void {
 
     // create an App instance
     const App = zap.App.Create(MyContext);
-    try App.init(allocator, &my_context, .{});
+    try App.init(io, allocator, &my_context, .{});
     defer App.deinit();
 
     // create the endpoints
-    var my_endpoint = SimpleEndpoint.init("/test", "some endpoint specific data");
+    var my_endpoint = SimpleEndpoint.init(io, "/test", "some endpoint specific data");
     var stop_endpoint: StopEndpoint = .{ .path = "/stop" };
     //
     // register the endpoints with the App

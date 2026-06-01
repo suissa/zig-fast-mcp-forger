@@ -1,19 +1,6 @@
 const std = @import("std");
 const zap = @import("zap.zig");
 
-/// A minimal, std.Io-free spinlock guarding in-memory lookup tables. Zig 0.16
-/// removed std.Thread.Mutex; std.Io.Mutex needs an Io value at every lock/unlock
-/// which this authenticator does not have. Contention here is negligible.
-const SpinLock = struct {
-    locked: std.atomic.Value(bool) = .init(false),
-    pub fn lock(self: *SpinLock) void {
-        while (self.locked.swap(true, .acquire)) std.atomic.spinLoopHint();
-    }
-    pub fn unlock(self: *SpinLock) void {
-        self.locked.store(false, .release);
-    }
-};
-
 /// Authentication Scheme enum: Basic or Bearer.
 pub const AuthScheme = enum {
     Basic,
@@ -390,14 +377,15 @@ pub const UserPassSessionArgs = struct {
 ///       -> on the server side which immediately block all other browsers as well.
 pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) type {
     return struct {
+        io: std.Io,
         allocator: std.mem.Allocator,
         lookup: *Lookup,
         settings: UserPassSessionArgs,
 
         // TODO: cookie store per user?
         sessionTokens: SessionTokenMap,
-        passwordLookupLock: SpinLock = .{},
-        tokenLookupLock: SpinLock = .{},
+        passwordLookupLock: std.Io.Mutex = .init,
+        tokenLookupLock: std.Io.Mutex = .init,
 
         const UserPassSessionAuth = @This();
         const SessionTokenMap = std.StringHashMap(void);
@@ -408,11 +396,13 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
         /// Construct this authenticator. See above and related types for more
         /// information.
         pub fn init(
+            io: std.Io,
             allocator: std.mem.Allocator,
             lookup: *Lookup,
             args: UserPassSessionArgs,
         ) !UserPassSessionAuth {
             const ret: UserPassSessionAuth = .{
+                .io = io,
                 .allocator = allocator,
                 .settings = .{
                     .usernameParam = try allocator.dupe(u8, args.usernameParam),
@@ -464,8 +454,8 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
             if (r.getCookieStr(self.allocator, self.settings.cookieName)) |maybe_cookie| {
                 if (maybe_cookie) |cookie| {
                     defer self.allocator.free(cookie);
-                    self.tokenLookupLock.lock();
-                    defer self.tokenLookupLock.unlock();
+                    self.tokenLookupLock.lockUncancelable(self.io);
+                    defer self.tokenLookupLock.unlock(self.io);
                     if (self.sessionTokens.getKeyPtr(cookie)) |keyPtr| {
                         const keySlice = keyPtr.*;
                         // if cookie is a valid session, remove it!
@@ -501,8 +491,8 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
                 if (maybe_cookie) |cookie| {
                     defer self.allocator.free(cookie);
                     // locked or unlocked token lookup
-                    self.tokenLookupLock.lock();
-                    defer self.tokenLookupLock.unlock();
+                    self.tokenLookupLock.lockUncancelable(self.io);
+                    defer self.tokenLookupLock.unlock(self.io);
                     if (self.sessionTokens.contains(cookie)) {
                         // cookie is a valid session!
                         zap.debug("Auth: COOKIE IS OK!!!!: {s}\n", .{cookie});
@@ -528,8 +518,8 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
                             // now check
                             const correct_pw_optional = brk: {
                                 if (lockedPwLookups) {
-                                    self.passwordLookupLock.lock();
-                                    defer self.passwordLookupLock.unlock();
+                                    self.passwordLookupLock.lockUncancelable(self.io);
+                                    defer self.passwordLookupLock.unlock(self.io);
                                     break :brk self.lookup.*.get(username);
                                 } else {
                                     break :brk self.lookup.*.get(username);
@@ -602,7 +592,7 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
             hasher.update(username);
             hasher.update(password);
             var buf: [16]u8 = undefined;
-            const time_nano = std.Io.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).nanoseconds;
+            const time_nano = std.Io.Timestamp.now(self.io, .real).nanoseconds;
             const timestampHex = try std.fmt.bufPrint(&buf, "{0x}", .{time_nano});
             hasher.update(timestampHex);
 
@@ -615,8 +605,8 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
 
         fn createAndStoreSessionToken(self: *UserPassSessionAuth, username: []const u8, password: []const u8) ![]const u8 {
             const token = try self.createSessionToken(username, password);
-            self.tokenLookupLock.lock();
-            defer self.tokenLookupLock.unlock();
+            self.tokenLookupLock.lockUncancelable(self.io);
+            defer self.tokenLookupLock.unlock(self.io);
 
             if (!self.sessionTokens.contains(token)) {
                 try self.sessionTokens.put(try self.allocator.dupe(u8, token), {});

@@ -6,12 +6,6 @@
 //!
 const std = @import("std");
 
-// Zig 0.16 removed Mutex; small io-free spinlock drop-in.
-const Mutex = struct {
-    locked: std.atomic.Value(bool) = .init(false),
-    pub fn lock(s: *Mutex) void { while (s.locked.swap(true, .acquire)) std.atomic.spinLoopHint(); }
-    pub fn unlock(s: *Mutex) void { s.locked.store(false, .release); }
-};
 const zap = @import("zap");
 const WebSockets = zap.WebSockets;
 
@@ -27,18 +21,21 @@ const Context = struct {
 const ContextList = std.ArrayList(*Context);
 
 const ContextManager = struct {
+    io: std.Io,
     allocator: std.mem.Allocator,
     channel: []const u8,
     usernamePrefix: []const u8,
-    lock: Mutex = .{},
+    lock: std.Io.Mutex = .init,
     contexts: ContextList = undefined,
 
     pub fn init(
+        io: std.Io,
         allocator: std.mem.Allocator,
         channelName: []const u8,
         usernamePrefix: []const u8,
     ) ContextManager {
         return .{
+            .io = io,
             .allocator = allocator,
             .channel = channelName,
             .usernamePrefix = usernamePrefix,
@@ -54,8 +51,8 @@ const ContextManager = struct {
     }
 
     pub fn newContext(self: *ContextManager) !*Context {
-        self.lock.lock();
-        defer self.lock.unlock();
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
 
         const ctx = try self.allocator.create(Context);
         const userName = try std.fmt.allocPrint(
@@ -204,13 +201,15 @@ var GlobalContextManager: ContextManager = undefined;
 const WebsocketHandler = WebSockets.Handler(Context);
 
 // here we go
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+
     var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
     const allocator = gpa.allocator();
 
-    GlobalContextManager = ContextManager.init(allocator, "chatroom", "user-");
+    GlobalContextManager = ContextManager.init(io, allocator, "chatroom", "user-");
     defer GlobalContextManager.deinit();
 
     // setup listener
