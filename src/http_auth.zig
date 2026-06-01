@@ -1,6 +1,19 @@
 const std = @import("std");
 const zap = @import("zap.zig");
 
+/// A minimal, std.Io-free spinlock guarding in-memory lookup tables. Zig 0.16
+/// removed std.Thread.Mutex; std.Io.Mutex needs an Io value at every lock/unlock
+/// which this authenticator does not have. Contention here is negligible.
+const SpinLock = struct {
+    locked: std.atomic.Value(bool) = .init(false),
+    pub fn lock(self: *SpinLock) void {
+        while (self.locked.swap(true, .acquire)) std.atomic.spinLoopHint();
+    }
+    pub fn unlock(self: *SpinLock) void {
+        self.locked.store(false, .release);
+    }
+};
+
 /// Authentication Scheme enum: Basic or Bearer.
 pub const AuthScheme = enum {
     Basic,
@@ -383,8 +396,8 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
 
         // TODO: cookie store per user?
         sessionTokens: SessionTokenMap,
-        passwordLookupLock: std.Thread.Mutex = .{},
-        tokenLookupLock: std.Thread.Mutex = .{},
+        passwordLookupLock: SpinLock = .{},
+        tokenLookupLock: SpinLock = .{},
 
         const UserPassSessionAuth = @This();
         const SessionTokenMap = std.StringHashMap(void);
@@ -589,7 +602,7 @@ pub fn UserPassSession(comptime Lookup: type, comptime lockedPwLookups: bool) ty
             hasher.update(username);
             hasher.update(password);
             var buf: [16]u8 = undefined;
-            const time_nano = std.time.nanoTimestamp();
+            const time_nano = std.Io.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).nanoseconds;
             const timestampHex = try std.fmt.bufPrint(&buf, "{0x}", .{time_nano});
             hasher.update(timestampHex);
 

@@ -354,13 +354,18 @@ pub fn _internal_sendError(self: *const Request, err: anyerror, err_trace: ?std.
     // TODO: let's hope 20k is enough. Maybe just really allocate here
     self.h.*.status = errorcode_num;
     var buf: [20 * 1024]u8 = undefined;
-    var writer = std.io.Writer.fixed(&buf);
+    var writer = std.Io.Writer.fixed(&buf);
     try writer.print("ERROR: {any}\n\n", .{err});
 
     if (err_trace) |trace| {
-        const debugInfo = try std.debug.getSelfDebugInfo();
-        const ttyConfig: std.io.tty.Config = .no_color;
-        try std.debug.writeStackTrace(trace, &writer, debugInfo, ttyConfig);
+        // Zig 0.16: `@errorReturnTrace()` yields a `std.builtin.StackTrace`,
+        // but `writeStackTrace` now takes a `*const std.debug.StackTrace`.
+        const dbg_trace: std.debug.StackTrace = .{
+            .return_addresses = trace.instruction_addresses[0..@min(trace.index, trace.instruction_addresses.len)],
+            .skipped = .none,
+        };
+        const term: std.Io.Terminal = .{ .writer = &writer, .mode = .no_color };
+        try std.debug.writeStackTrace(&dbg_trace, term);
     }
 
     try self.sendBody(writer.buffered());

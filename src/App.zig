@@ -15,7 +15,36 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Thread = std.Thread;
-const RwLock = Thread.RwLock;
+
+/// A minimal, `std.Io`-free spinning reader/writer lock. Zig 0.16 removed
+/// `std.Thread.RwLock`; the `std.Io`-based replacements require an `Io` value at
+/// every lock/unlock call, which this code path does not have available.
+/// `state`: 0 = unlocked, -1 = write-locked, N>0 = N readers.
+const RwLock = struct {
+    state: std.atomic.Value(i32) = .init(0),
+
+    pub fn lock(self: *RwLock) void {
+        while (self.state.cmpxchgWeak(0, -1, .acquire, .monotonic) != null) {
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    pub fn unlock(self: *RwLock) void {
+        self.state.store(0, .release);
+    }
+
+    pub fn lockShared(self: *RwLock) void {
+        while (true) {
+            const cur = self.state.load(.monotonic);
+            if (cur >= 0 and self.state.cmpxchgWeak(cur, cur + 1, .acquire, .monotonic) == null) return;
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    pub fn unlockShared(self: *RwLock) void {
+        _ = self.state.fetchSub(1, .release);
+    }
+};
 
 const zap = @import("zap.zig");
 const Request = zap.Request;
