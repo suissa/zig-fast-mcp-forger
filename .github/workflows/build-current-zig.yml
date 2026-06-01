@@ -35,5 +35,9 @@ jobs:
         run: zig build test-sendfile
       - name: Run authentication tests
         run: zig build test-auth
+      - name: Run recvfile tests
+        run: zig build test-recv
+      - name: Run recvfile (no type) tests
+        run: zig build test-recv_notype
       - name: Report end of tests
         run: echo "tests finished"
