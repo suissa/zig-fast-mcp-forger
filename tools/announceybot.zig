@@ -33,17 +33,23 @@ fn usage() void {
     std.process.exit(1);
 }
 
-var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+var general_purpose_allocator = std.heap.DebugAllocator(.{}){};
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     const gpa = general_purpose_allocator.allocator();
+    const io = init.io;
     defer _ = general_purpose_allocator.deinit();
 
     var arena_instance = std.heap.ArenaAllocator.init(gpa);
     defer arena_instance.deinit();
     const arena = arena_instance.allocator();
 
-    const args = try std.process.argsAlloc(arena);
+    var args_list: std.ArrayList([:0]const u8) = .empty;
+    {
+        var args_it: std.process.Args.Iterator = .init(init.minimal.args);
+        while (args_it.next()) |a| try args_list.append(arena, a);
+    }
+    const args = args_list.items;
     if (args.len < 3) {
         // includes help command :-)
         return usage();
@@ -57,15 +63,19 @@ pub fn main() !void {
     }
 
     if (std.mem.eql(u8, command, "announce")) {
-        return command_announce(gpa, tagname);
+        const url = init.environ_map.get("WEBHOOK_URL") orelse {
+            std.debug.print("WEBHOOK_URL environment variable not set!\n", .{});
+            std.process.exit(1);
+        };
+        return command_announce(io, gpa, url, tagname);
     }
 
     if (std.mem.eql(u8, command, "release-notes")) {
-        return command_releasenotes(gpa, tagname);
+        return command_releasenotes(io, gpa, tagname);
     }
 
     if (std.mem.eql(u8, command, "update-readme")) {
-        return command_update_readme(gpa, tagname);
+        return command_update_readme(io, gpa, tagname);
     }
 
     // undocumented commands
@@ -90,12 +100,11 @@ fn get_tag_annotation(allocator: std.mem.Allocator, tagname: []const u8) ![]cons
         tagname,
     };
 
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
+    const result = try std.process.run(allocator, std.Io.Threaded.global_single_threaded.io(), .{
         .argv = &args,
     });
     const return_string = switch (result.term) {
-        .Exited => |code| if (code == 0) result.stdout else result.stderr,
+        .exited => |code| if (code == 0) result.stdout else result.stderr,
         else => result.stderr,
     };
 
@@ -121,10 +130,10 @@ fn renderTemplate(allocator: std.mem.Allocator, template: []const u8, substitute
     return try std.mem.replaceOwned(u8, allocator, s1, "{annotation}", the_anno);
 }
 
-fn sendToDiscordPart(allocator: std.mem.Allocator, url: []const u8, message_json: []const u8) !void {
+fn sendToDiscordPart(io: std.Io, allocator: std.mem.Allocator, url: []const u8, message_json: []const u8) !void {
 
     // client
-    var http_client: std.http.Client = .{ .allocator = allocator };
+    var http_client: std.http.Client = .{ .allocator = allocator, .io = io };
 
     const response = try http_client.fetch(.{
         .location = .{ .url = url },
@@ -139,18 +148,18 @@ fn sendToDiscordPart(allocator: std.mem.Allocator, url: []const u8, message_json
     }
 }
 
-fn sendToDiscord(allocator: std.mem.Allocator, url: []const u8, message: []const u8) !void {
+fn sendToDiscord(io: std.Io, allocator: std.mem.Allocator, url: []const u8, message: []const u8) !void {
     // json payload
     // max size: 100kB
     const buf: []u8 = try allocator.alloc(u8, 100 * 1024);
     defer allocator.free(buf);
-    var w: std.io.Writer = .fixed(buf);
+    var w: std.Io.Writer = .fixed(buf);
     try std.json.Stringify.value(.{ .content = message }, .{}, &w);
     const string = w.buffered();
 
     // We need to split shit into max 2000 characters
     if (string.len < 1999) {
-        try sendToDiscordPart(allocator, url, string);
+        try sendToDiscordPart(io, allocator, url, string);
         return;
     }
 
@@ -263,18 +272,18 @@ fn sendToDiscord(allocator: std.mem.Allocator, url: []const u8, message: []const
         const desc = chunks.items[it];
         const part = message[desc.from..desc.to];
 
-        var ww: std.io.Writer = .fixed(buf);
+        var ww: std.Io.Writer = .fixed(buf);
         try std.json.Stringify.value(.{ .content = part }, .{}, &ww);
         const part_string = ww.buffered();
 
         std.debug.print("SENDING PART {d} / {d}: ... ", .{ it, chunks.items.len });
-        try sendToDiscordPart(allocator, url, part_string);
+        try sendToDiscordPart(io, allocator, url, part_string);
         std.debug.print("done!\n", .{});
         it += 1;
     }
 }
 
-fn command_announce(allocator: std.mem.Allocator, tag: []const u8) !void {
+fn command_announce(io: std.Io, allocator: std.mem.Allocator, url: []const u8, tag: []const u8) !void {
     const annotation = try get_tag_annotation(allocator, tag);
     defer allocator.free(annotation);
 
@@ -285,15 +294,13 @@ fn command_announce(allocator: std.mem.Allocator, tag: []const u8) !void {
 
     // std.debug.print("{s}\n", .{announcement});
     defer allocator.free(announcement);
-    const url = try std.process.getEnvVarOwned(allocator, "WEBHOOK_URL");
-    defer allocator.free(url);
-    sendToDiscord(allocator, url, announcement) catch |err| {
+    sendToDiscord(io, allocator, url, announcement) catch |err| {
         std.debug.print("HTTP ERROR: {any}\n", .{err});
         std.process.exit(1);
     };
 }
 
-fn command_releasenotes(allocator: std.mem.Allocator, tag: []const u8) !void {
+fn command_releasenotes(io: std.Io, allocator: std.mem.Allocator, tag: []const u8) !void {
     const annotation = try get_tag_annotation(allocator, tag);
     defer allocator.free(annotation);
 
@@ -304,12 +311,12 @@ fn command_releasenotes(allocator: std.mem.Allocator, tag: []const u8) !void {
     defer allocator.free(release_notes);
 
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+    var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
     try stdout.writeAll(release_notes);
     try stdout.flush();
 }
-fn command_update_readme(allocator: std.mem.Allocator, tag: []const u8) !void {
+fn command_update_readme(io: std.Io, allocator: std.mem.Allocator, tag: []const u8) !void {
     const annotation = try get_tag_annotation(allocator, tag);
     defer allocator.free(annotation);
 
@@ -320,13 +327,13 @@ fn command_update_readme(allocator: std.mem.Allocator, tag: []const u8) !void {
     defer allocator.free(update_part);
 
     // read the readme
-    const readme = try std.fs.cwd().readFileAlloc(allocator, README_PATH, README_MAX_SIZE);
+    const readme = try std.Io.Dir.cwd().readFileAlloc(io, README_PATH, allocator, .limited(README_MAX_SIZE));
     defer allocator.free(readme);
 
-    var output_file = try std.fs.cwd().createFile(README_PATH, .{});
-    defer output_file.close();
+    var output_file = try std.Io.Dir.cwd().createFile(io, README_PATH, .{});
+    defer output_file.close(io);
     var output_buffer: [2048]u8 = undefined;
-    var output_writer = output_file.writer(&output_buffer);
+    var output_writer = output_file.writer(io, &output_buffer);
     const writer = &output_writer.interface;
 
     // iterate over lines

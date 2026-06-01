@@ -7,7 +7,7 @@
 const std = @import("std");
 const zap = @import("zap");
 
-var gpa = std.heap.GeneralPurposeAllocator(.{
+var gpa = std.heap.DebugAllocator(.{
     .thread_safe = true,
 }){};
 

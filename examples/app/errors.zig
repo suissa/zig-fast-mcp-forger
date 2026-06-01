@@ -65,7 +65,7 @@ const StopEndpoint = struct {
 
 pub fn main() !void {
     // setup allocations
-    var gpa: std.heap.GeneralPurposeAllocator(.{
+    var gpa: std.heap.DebugAllocator(.{
         // just to be explicit
         .thread_safe = true,
     }) = .{};

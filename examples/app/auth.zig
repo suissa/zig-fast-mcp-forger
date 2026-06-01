@@ -61,7 +61,7 @@ const MyEndpoint = struct {
 };
 
 pub fn main() !void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{
+    var gpa: std.heap.DebugAllocator(.{
         // just to be explicit
         .thread_safe = true,
     }) = .{};

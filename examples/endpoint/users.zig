@@ -1,8 +1,15 @@
 const std = @import("std");
 
+// Zig 0.16 removed Mutex; small io-free spinlock drop-in.
+const Mutex = struct {
+    locked: std.atomic.Value(bool) = .init(false),
+    pub fn lock(s: *Mutex) void { while (s.locked.swap(true, .acquire)) std.atomic.spinLoopHint(); }
+    pub fn unlock(s: *Mutex) void { s.locked.store(false, .release); }
+};
+
 alloc: std.mem.Allocator = undefined,
 users: std.AutoHashMap(usize, InternalUser) = undefined,
-lock: std.Thread.Mutex = undefined,
+lock: Mutex = undefined,
 count: usize = 0,
 
 pub const Users = @This();
@@ -25,7 +32,7 @@ pub fn init(a: std.mem.Allocator) Users {
     return .{
         .alloc = a,
         .users = std.AutoHashMap(usize, InternalUser).init(a),
-        .lock = std.Thread.Mutex{},
+        .lock = Mutex{},
     };
 }
 

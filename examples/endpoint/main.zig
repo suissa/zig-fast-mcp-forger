@@ -25,7 +25,7 @@ fn on_error(_: zap.Request, err: anyerror) void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{
+    var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
     const allocator = gpa.allocator();

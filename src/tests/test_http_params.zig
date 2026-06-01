@@ -10,7 +10,8 @@ pub const std_options: std.Options = .{
 };
 
 fn makeRequest(a: std.mem.Allocator, url: []const u8) !void {
-    var http_client: std.http.Client = .{ .allocator = a };
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var http_client: std.http.Client = .{ .allocator = a, .io = io };
     defer http_client.deinit();
 
     _ = try http_client.fetch(.{

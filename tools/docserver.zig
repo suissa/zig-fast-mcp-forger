@@ -6,8 +6,8 @@ fn on_request(r: zap.Request) !void {
     r.sendBody("<html><body><h1>404 - File not found</h1></body></html>") catch return;
 }
 
-pub fn main() !void {
-    var args_it = std.process.args();
+pub fn main(init: std.process.Init) !void {
+    var args_it: std.process.Args.Iterator = .init(init.minimal.args);
     var port: usize = 8080;
     var docs_dir: []const u8 = "zig-out/zap";
 

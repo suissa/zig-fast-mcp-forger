@@ -131,7 +131,7 @@ fn on_request(r: zap.Request) !void {
 }
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{
+    var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
 

@@ -18,7 +18,8 @@ const EXPECTED_FILENAME = "myfile.txt";
 var test_error: ?anyerror = null;
 
 fn makeRequest(allocator: std.mem.Allocator, url: []const u8) !void {
-    var http_client: std.http.Client = .{ .allocator = allocator };
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var http_client: std.http.Client = .{ .allocator = allocator, .io = io };
     defer http_client.deinit();
 
     const payload_wrong_line_ending = try std.fmt.allocPrint(allocator,

@@ -57,7 +57,7 @@ const SimpleEndpoint = struct {
             .{ context.db_connection, e.some_data, arena.ptr, thread_id },
         );
         try r.sendBody(response_text);
-        std.Thread.sleep(std.time.ns_per_ms * 300);
+        std.Io.Threaded.global_single_threaded.io().sleep(std.Io.Duration.fromNanoseconds(std.time.ns_per_ms * 300), .awake) catch {};
     }
 };
 
@@ -78,7 +78,7 @@ const StopEndpoint = struct {
 
 pub fn main() !void {
     // setup allocations
-    var gpa: std.heap.GeneralPurposeAllocator(.{
+    var gpa: std.heap.DebugAllocator(.{
         // just to be explicit
         .thread_safe = true,
     }) = .{};

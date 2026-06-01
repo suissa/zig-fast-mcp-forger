@@ -17,7 +17,8 @@ pub const std_options: std.Options = .{
 
 // We send ourselves a request with a cookie
 fn makeRequest(a: std.mem.Allocator, url: []const u8) !void {
-    var http_client: std.http.Client = .{ .allocator = a };
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var http_client: std.http.Client = .{ .allocator = a, .io = io };
     defer http_client.deinit();
 
     _ = try http_client.fetch(.{
@@ -35,7 +36,7 @@ fn makeRequestThread(a: std.mem.Allocator, url: []const u8) !std.Thread {
 
 // here we go
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{
+    var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
     const allocator = gpa.allocator();

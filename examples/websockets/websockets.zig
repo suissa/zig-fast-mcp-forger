@@ -5,6 +5,13 @@
 //! Run   me with `zig build run-websockets`.
 //!
 const std = @import("std");
+
+// Zig 0.16 removed Mutex; small io-free spinlock drop-in.
+const Mutex = struct {
+    locked: std.atomic.Value(bool) = .init(false),
+    pub fn lock(s: *Mutex) void { while (s.locked.swap(true, .acquire)) std.atomic.spinLoopHint(); }
+    pub fn unlock(s: *Mutex) void { s.locked.store(false, .release); }
+};
 const zap = @import("zap");
 const WebSockets = zap.WebSockets;
 
@@ -23,7 +30,7 @@ const ContextManager = struct {
     allocator: std.mem.Allocator,
     channel: []const u8,
     usernamePrefix: []const u8,
-    lock: std.Thread.Mutex = .{},
+    lock: Mutex = .{},
     contexts: ContextList = undefined,
 
     pub fn init(
@@ -198,7 +205,7 @@ const WebsocketHandler = WebSockets.Handler(Context);
 
 // here we go
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{
+    var gpa = std.heap.DebugAllocator(.{
         .thread_safe = true,
     }){};
     const allocator = gpa.allocator();
